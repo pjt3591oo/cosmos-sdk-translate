@@ -132,3 +132,64 @@ Tendermint에 트랜잭션(블록에 포함된)이 도착할 때, 그것은 [ABC
 
 
 
+# 2. ./app.go 에서 어플리케이션 구현 실행.
+
+
+
+## 어플리케이션 시작
+
+새로운 파일(`./app.go`)을 생성하여 시작합니다. 이 파일은 어플리케이션에서 상태머신(deterministic state-machine)의 핵심입니다.
+
+`app.go` 파일을 보면, 트랜잭션을 받을 때 수행하는 작업을 정의합니다. 먼저, 올바른 순서로 트랜잭션 수신할 수 있어야 합니다. 이것은 [Tendermint consensus engine](https://github.com/tendermint/tendermint)의 역할입니다.
+
+먼저 의존성 파일을 가져옵니다.
+
+```
+package app
+
+import (
+    "github.com/tendermint/tendermint/libs/log"
+    "github.com/cosmos/cosmos-sdk/x/auth"
+
+	 bam "github.com/cosmos/cosmos-sdk/baseapp"
+	 dbm "github.com/tendermint/tendermint/libs/db"
+)
+```
+
+임포트된 각각의 패키지, 모듈에 대한 문서로 링크되어있습니다.
+
+* `log`: tendermint의 로거.
+* `auto`: 코스모스 SDK를 위한 `auth` 모듈
+* `dbm`: tendermint 데이터베이스를 사용하기 위한 코드.
+* `baseapp`: 아래내용 참조
+
+패키지 몇개는 tendermint의 패키지 입니다. tendermint는 [ABCI](https://github.com/tendermint/tendermint/tree/master/abci)라고 불리는 상호작용을 통한 네트워크로 부터 발생된 트랜잭션을 보냅니다. 만약 설치된 블록체인 아키텍처를 본다면 그것은 다음과 같을 것 입니다.
+
+```
++---------------------+
+|                     |
+|     Application     |
+|                     |
++--------+---+--------+
+         ^   |
+         |   | ABCI
+         |   v
++--------+---+--------+
+|                     |
+|                     |
+|     Tendermint      |
+|                     |
+|                     |
++---------------------+
+```
+
+다행히도 ABCI 인터페이스를 구현할 필요 없습니다. 코스모스 SDK에서 [`baseapp`](https://godoc.org/github.com/cosmos/cosmos-sdk/baseapp)의 형태로 구현을 제공합니다.
+
+
+
+다음은 `baseapp`이 무엇을 하는지 보여줍니다.
+
+* 텐더민트 합의 엔진에서 받은 트랜잭션을 디코딩 합니다.
+* 트랜잭션에서 메시지를 추출하고 기본적인 검사를 수행합니다.
+* 메시지가 처리될 수 있도록 적절한 모듈로 전달합니다. `bashapp`은 사용하려는 특정 모듈에 대한 지식이 없습니다. 이 튜토리얼 뒷 부분에서 볼 수 있듯이 이러한 모듈은 app.go에 선언하는 것은 사용자의 일 입니다.
+* 
