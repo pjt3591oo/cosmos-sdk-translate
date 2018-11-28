@@ -144,7 +144,7 @@ Tendermint에 트랜잭션(블록에 포함된)이 도착할 때, 그것은 [ABC
 
 먼저 의존성 파일을 가져옵니다.
 
-```
+```go
 package app
 
 import (
@@ -192,4 +192,47 @@ import (
 * 텐더민트 합의 엔진에서 받은 트랜잭션을 디코딩 합니다.
 * 트랜잭션에서 메시지를 추출하고 기본적인 검사를 수행합니다.
 * 메시지가 처리될 수 있도록 적절한 모듈로 전달합니다. `bashapp`은 사용하려는 특정 모듈에 대한 지식이 없습니다. 이 튜토리얼 뒷 부분에서 볼 수 있듯이 이러한 모듈은 app.go에 선언하는 것은 사용자의 일 입니다.
-* 
+* ABCI 메시지가 [`DeliverTx`](https://tendermint.com/docs/spec/abci/abci.html#delivertx) 되면 커밋([`CheckTx`](https://tendermint.com/docs/spec/abci/abci.html#checktx)  변경이 지속되지 않음)
+* 각 블록의 시작과 끝 부분에 로직 실행을 정의할 수 잇는 두 메시지인 [`Beginblock`](https://tendermint.com/docs/spec/abci/abci.html#beginblock)과 [`Endblock`](https://tendermint.com/docs/spec/abci/abci.html#endblock) 설정을 도와줌. 각 모듈은 BeginBlock과 EndBlock 하위 로직 구현하며, 앱의 역할은 모든 것을 함께 통합하는 것입니다.(응용프로그램에서는 이러한 메시지를 사용하지 않습니다.)
+* 상태 초기화를 도와줍니다.
+* 조회를 도와줍니다.
+
+지금 여러분들은 새로운 사용자 정의된 타입의 `nameserviceApp` 생성이 필요합니다. 이 타입은 `baseapp`에 포함(embed)되는것은 (다른 언어의 상속과 유사한 golang 에서의 embedding)`baseapp`의 메소드 접근할 수 있습니다.
+
+```go
+const (
+    appName = "nameservice"
+)
+
+type nameserviceApp struct {
+    *bam.BaseApp
+}
+```
+
+어플리케이션을 위해 간단한 생성자를 추가합니다.
+
+```go
+func NewnameserviceApp(logger log.Logger, db dbm.DB) *nameserviceApp {
+
+    // First define the top level codec that will be shared by the different modules
+    cdc := MakeCodec()
+
+    // BaseApp handles interactions with Tendermint through the ABCI protocol
+    bApp := bam.NewBaseApp(appName, logger, db, auth.DefaultTxDecoder(cdc))
+
+    var app = &nameserviceApp{
+        BaseApp: bApp,
+        cdc:     cdc,
+    }
+
+    return app
+}
+```
+
+멋집니다! 여러분들은 어플피케이션의 기본 골격을 가지고 있습니다. 하지만 아직 기능이 많이 부족합니다.
+
+`baseapp`은 라우트, 어플리케이션에서 사용할 상호작용을 알지 못합니다. 어플리케이션에서 기본적인 역할은 라우트들을 정의합니다. 그 중 다른 역할은 상태 초기화를 정의합니다. 이 두가지 형태의 모듈을 어플리케이션에 추가해야 합니다.
+
+[application design](https://github.com/cosmos/sdk-application-tutorial/blob/master/tutorial/app-design.md) 파트에 나와있는것 처럼, nameservice를 위해 `auth`, `bank` 그리고 `nameservice`3개의 모듈이 필요합니다. 첫 번째로 두개는 이미 존재합니다, 그라나 마지막은 아닙니다. `nameservice` 모듈은 여러분의 상태 머신의 대부분을 정의합니다. 다음단계는 그것을 구축하는 것 입니다.
+
+ 
