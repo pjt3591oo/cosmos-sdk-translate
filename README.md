@@ -2,6 +2,10 @@
 
 
 
+[COSMOS-SDK Tutorial 한글버전](https://github.com/pjt3591oo/cosmos-sdk-translate/blob/master/tutorial.md)
+
+
+
 ### 튜토리얼 파트
 
 1. 어플리케이션 설명. (번역완료)
