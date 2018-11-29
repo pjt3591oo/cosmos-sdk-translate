@@ -397,3 +397,302 @@ func NewKeeper(coinKeeper bank.Keeper, namesStoreKey sdk.StoreKey, ownersStoreKe
 
 
 
+# 4. Msgs와 Handlers 를 통해 상태 트랜잭션 정의
+
+
+
+## Msgs와 Handlers
+
+이제 `Keeper`가 설정습니다. Msgs와 Handler를 만들어 사용자가 실제로 이름을 구입하여 값을 설정할 수 있습니다.
+
+
+
+## `Msgs`
+
+`Msgs`는 상태 전환을 트리거합니다. 메시지는 클라이언트가 네트워크에 전파하는 [`Txs`](https://github.com/cosmos/cosmos-sdk/blob/develop/types/tx_msg.go#L34-L38)로 묶입니다. 코스모스 SDK는 `Txs `로 부터 `Msgs`를 래핑하거나 래핑을 풀 수 있고, 이것은 개발자가 `Msgs`를 정의하기만 하면 됩니다. `Msgs`는 다음 인터페이스를 충족해야 합니다.
+
+```go
+// Transactions messages must fulfill the Msg
+type Msg interface {
+	// Return the message type.
+	// Must be alphanumeric or empty.
+	Type() string
+
+	// Returns a human-readable string for the message, intended for utilization
+	// within tags
+	Route() string
+
+	// ValidateBasic does a simple validation check that
+	// doesn't require access to any other information.
+	ValidateBasic() Error
+
+	// Get the canonical byte representation of the Msg.
+	GetSignBytes() []byte
+
+	// Signers returns the addrs of signers that must sign.
+	// CONTRACT: All signatures must be present to be valid.
+	// CONTRACT: Returns addrs in some deterministic order.
+	GetSigners() []AccAddress
+}
+```
+
+## `Handlers`
+
+`Handlers`는 주어진 `Msgs`가 수실될 때 수행해야 하는 작업(업데이트 할 방법 및 조건을 필요로하는 저장소)을 정의합니다.
+
+이 모듈에는 사용자가 어플리케이션 상태와 상호 작용하기 위해 보낼 수 있는 두가지 형태의 `Msgs`인 [`SetName`](https://github.com/cosmos/sdk-application-tutorial/blob/master/tutorial/set-name.md)과 [`BuyName`](https://github.com/cosmos/sdk-application-tutorial/blob/master/tutorial/buy-name.md)이 있습니다. 그들은 각각 연관된 `Handler`를 가질것 입니다.
+
+
+
+## SetName
+
+
+
+## `Msg`
+
+SDK에서 `Msgs` 네이밍 규칙은 `Msg {{action}}`입니다. 구현할 첫 번째 작업은 주소 소유자가 이름을 설정하도록 허용하는 `Msgs`인 `SetName` 입니다. `./x/nameservice/msgs.go`라는 새로운 파일에서 `MsgSetName`을 정의하여 시작합니다.
+
+```go
+package nameservice
+
+import (
+	"encoding/json"
+
+	sdk "github.com/cosmos/cosmos-sdk/types"
+)
+
+// MsgSetName defines a SetName message
+type MsgSetName struct {
+	NameID string
+	Value  string
+	Owner  sdk.AccAddress
+}
+
+// NewMsgSetName is a constructor function for MsgSetName
+func NewMsgSetName(name string, value string, owner sdk.AccAddress) MsgSetName {
+	return MsgSetName{
+		NameID: name,
+		Value:  value,
+		Owner:  owner,
+	}
+}
+```
+
+`MsgSetName`에는 이름의 값을 설정하는 데 필요한 세 가지 속성을 가지고 있습니다.
+
+* `name` - 이름 설정
+* `value` - 이름이 결정되는 대상
+* `owner` - 이름의 소유자
+
+> 참고 :  필드 이름은 `name` 대신 `nameID`입니다. `.Route()`는 `Msg` 인터페이스 이름입니다. 이 문제는  [future update of the SDK](https://github.com/cosmos/cosmos-sdk/issues/2456)에서 풀어야합니다.
+
+다음으로 `Msg` 인터페이스를 구현합니다.
+
+```go
+// Type should return the name of the module
+func (msg MsgSetName) Route() string { return "nameservice" }
+
+// Name should return the action
+func (msg MsgSetName) Type() string { return "set_name"}
+```
+
+앞의 함수는 SDK에서 `Msgs`를 적절한 모듈로 전달하여 처리하도록 합니다. 또한 인덱싱에서 사용되는 데이터베이스 태그에 사람이 읽을 수 있는 이름을 추가합니다.
+
+```go
+// ValdateBasic Implements Msg.
+func (msg MsgSetName) ValidateBasic() sdk.Error {
+	if msg.Owner.Empty() {
+		return sdk.ErrInvalidAddress(msg.Owner.String())
+	}
+	if len(msg.NameID) == 0 || len(msg.Value) == 0 {
+		return sdk.ErrUnknownRequest("Name and/or Value cannot be empty")
+	}
+	return nil
+}
+```
+
+`ValidateBasic`는 메시지의 유효성에 대한 몇가지 기본적인 **stateless** 검사를 위해 사용합니다. 첫 번째 케이스로 비어있는 속성이 없는지 확인합니다. 여기서 `sdk.Error` 타입을 사용하는것을 참고하세요. SDK는 어플리케이션 개발자가 자주접하는 에러 유형 집합을 제공합니다.
+
+```go
+// GetSignBytes Implements Msg.
+func (msg MsgSetName) GetSignBytes() []byte {
+	b, err := json.Marshal(msg)
+	if err != nil {
+		panic(err)
+	}
+	return sdk.MustSortJSON(b)
+}
+```
+
+`GetSignBytes`는 `Msg`가 서명을 위해 인코딩되는 방법을 정의합니다. 대부분의 경우 저장된 JSON을 **마샬링(marshal)**합니다. 출력은 수정할 수 없습니다.
+
+```go
+// GetSigners Implements Msg.
+func (msg MsgSetName) GetSigners() []sdk.AccAddress {
+	return []sdk.AccAddress{msg.Owner}
+}
+```
+
+`GetSigners`는 유효한 서명을 위해 `Tx`에서 필요한 서명을 정의합니다. 이 경우 예를들어, `MsgSetName`은 이름이 가리키는 것을 재설정 하려고 할 때 소유자가 트랜잭션에 서명해야 합니다.
+
+## **Handelr**
+
+이제 `MsgSetName`이 지정 되었습니다. 다음 스탭은 이 메시지가 수신 될 때 취해야 할 조치를 정의하는 것입니다. 이것이 `Handler`의 역할입니다.
+
+새로운 파일 `./x/nameservice/handler.go`에서  다음 코드로 시작하십시오.
+
+```go
+package nameservice
+
+import (
+	"fmt"
+
+	sdk "github.com/cosmos/cosmos-sdk/types"
+)
+
+// NewHandler returns a handler for "nameservice" type messages.
+func NewHandler(keeper Keeper) sdk.Handler {
+	return func(ctx sdk.Context, msg sdk.Msg) sdk.Result {
+		switch msg := msg.(type) {
+		case MsgSetName:
+			return handleMsgSetName(ctx, keeper, msg)
+		default:
+			errMsg := fmt.Sprintf("Unrecognized nameservice Msg type: %v", msg.Type())
+			return sdk.ErrUnknownRequest(errMsg).Result()
+		}
+	}
+}
+```
+
+`NewHandler`는 본질적으로 이 모듈로 들어오는 메시지를 적잘한 처리기로 보내는 하위 라우터입니다. 지금은 단 하나의 메시지 / `Msg/Handle`이 있습니다.
+
+이제 `handleMsgSetName`에서 `MsgSetName` 메시지를 처리하기 위한 실제 로직을 정의해야 합니다.
+
+> 참고: SDK에서 핸들러 네이밍 규칙은 `handlerMsg{{.Action}} 입니다.
+
+```go
+// Handle MsgSetName
+func handleMsgSetName(ctx sdk.Context, keeper Keeper, msg MsgSetName) sdk.Result {
+	if !msg.Owner.Equals(keeper.GetOwner(ctx, msg.NameID)) { // Checks if the the msg sender is the same as the current owner
+		return sdk.ErrUnauthorized("Incorrect Owner").Result() // If not, throw an error
+	}
+	keeper.SetName(ctx, msg.NameID, msg.Value) // If so, set the name to the value specified in the msg.
+	return sdk.Result{}                      // return
+}
+```
+
+이 함수에서 `Msg`를 보낸 사람이 실제로 이름의 소유자인지 확인합니다 (`keeper.GetOwner`). 그렇다면 `Keeper`에서 함수를 호출하여 이름을 설정할 수 있습니다. 그렇지 않다면, 에러를 발생하여 사용자에게 반환합니다.
+
+
+
+## BuyName
+
+
+
+##  `Msg`
+
+이제 `./nameservice/msgs.go` 파일에 이름을 구입하고 `Msg`를 정의해야 합니다. 이 코드는 `SetName`과 매우 유사합니다.
+
+```go
+// MsgBuyName defines the BuyName message
+type MsgBuyName struct {
+	NameID string
+	Bid    sdk.Coins
+	Buyer  sdk.AccAddress
+}
+
+// NewMsgBuyName is the constructor function for MsgBuyName
+func NewMsgBuyName(name string, bid sdk.Coins, buyer sdk.AccAddress) MsgBuyName {
+	return MsgBuyName{
+		NameID: name,
+		Bid:    bid,
+		Buyer:  buyer,
+	}
+}
+
+// Type Implements Msg.
+func (msg MsgBuyName) Route() string { return "nameservice" }
+
+// Name Implements Msg.
+func (msg MsgBuyName) Type() string { return "buy_name" }
+
+// ValidateBasic Implements Msg.
+func (msg MsgBuyName) ValidateBasic() sdk.Error {
+	if msg.Buyer.Empty() {
+		return sdk.ErrInvalidAddress(msg.Buyer.String())
+	}
+	if len(msg.NameID) == 0 {
+		return sdk.ErrUnknownRequest("Name cannot be empty")
+	}
+	if !msg.Bid.IsPositive() {
+		return sdk.ErrInsufficientCoins("Bids must be positive")
+	}
+	return nil
+}
+
+// GetSignBytes Implements Msg.
+func (msg MsgBuyName) GetSignBytes() []byte {
+	b, err := json.Marshal(msg)
+	if err != nil {
+		panic(err)
+	}
+	return sdk.MustSortJSON(b)
+}
+
+// GetSigners Implements Msg.
+func (msg MsgBuyName) GetSigners() []sdk.AccAddress {
+	return []sdk.AccAddress{msg.Buyer}
+}
+```
+
+다음 으로, `./x/nameservice/handler.go` 파일에서, 모듈 라우터에 `MsgBuyName` 처리기를 추가합니다.
+
+```go
+// NewHandler returns a handler for "nameservice" type messages.
+func NewHandler(keeper Keeper) sdk.Handler {
+	return func(ctx sdk.Context, msg sdk.Msg) sdk.Result {
+		switch msg := msg.(type) {
+		case MsgSetName:
+			return handleMsgSetName(ctx, keeper, msg)
+		case MsgBuyName:
+			return handleMsgBuyName(ctx, keeper, msg)
+		default:
+			errMsg := fmt.Sprintf("Unrecognized nameservice Msg type: %v", msg.Type())
+			return sdk.ErrUnknownRequest(errMsg).Result()
+		}
+	}
+```
+
+마지막으로, 메시지에 의해 트리거 된 상태전이를 수행하는 `BuyName`의 `핸들러` 함수를 정의합니다. 이 시점에서 메시지에는 `ValidateBasic` 함수가 실행되어 일부 입력 검증합니다. 그러나 `ValidateBasic`은 어플리케이션 상태를 조회할 수 없습니다. 네트워크 상태(예, 계정 잔액)에 의존하는 유효성 검사 로직은 `handler` 기능에서 수행되어야 합니다.
+
+```go
+// Handle MsgBuyName
+func handleMsgBuyName(ctx sdk.Context, keeper Keeper, msg MsgBuyName) sdk.Result {
+	if keeper.GetPrice(ctx, msg.NameID).IsGTE(msg.Bid) { // Checks if the the bid price is greater than the price paid by the current owner
+		return sdk.ErrInsufficientCoins("Bid not high enough").Result() // If not, throw an error
+	}
+	if keeper.HasOwner(ctx, msg.NameID) {
+		_, err := keeper.coinKeeper.SendCoins(ctx, msg.Buyer, keeper.GetOwner(ctx, msg.NameID), msg.Bid)
+		if err != nil {
+			return sdk.ErrInsufficientCoins("Buyer does not have enough coins").Result()
+		}
+	} else {
+		_, _, err := keeper.coinKeeper.SubtractCoins(ctx, msg.Buyer, msg.Bid) // If so, deduct the Bid amount from the sender
+		if err != nil {
+			return sdk.ErrInsufficientCoins("Buyer does not have enough coins").Result()
+		}
+	}
+	keeper.SetOwner(ctx, msg.NameID, msg.Buyer)
+	keeper.SetPrice(ctx, msg.NameID, msg.Bid)
+	return sdk.Result{}
+}
+```
+
+먼저, 입찰가가 현재 가격보다 높은지 먼저 확인합니다. 그런다음 이름에 이미 소유자가 있는지 확인합니다. 그럴 경우 이전 소유자는 `구매자`로부터 돈을 수령하게 됩니다.
+
+만약 소유자가 없다면, `nameservice` 모듈은 `구매자`로 부터 소각(복구할 수 없는 주소로 보냄) 합니다.
+
+`SubtractCoins` 또는 `SendCoins`가 nil이 아닌 오류를 반환하면, 핸들러가 오류를 발생시켜 상태 전이를 되돌립니다. 그렇지 않으면 이전에 `Keeper`에 정의된 getter 및 setter를 사용하여 핸들러가 구매자를 새 소유자로 설정하고 새 가격을 현재 입찰가로 설정합니다.
+
+> 참고:  이 핸들러는 코인 운영을 위해 `coinKeeper`의 기능을 사용합니다. 어플리케이션에서 코인 운영 작업을 수행하는 경우  [godocs for this module](https://godoc.org/github.com/cosmos/cosmos-sdk/x/bank#BaseKeeper)를 참고하세요.
+

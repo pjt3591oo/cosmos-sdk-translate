@@ -8,12 +8,12 @@
 
 ### 튜토리얼 파트
 
-1. 어플리케이션 설명. (번역완료) - [원문 보러가기](https://github.com/cosmos/sdk-application-tutorial/blob/master/tutorial/app-design.md)
-2. `./app.go`에서 어플리케이션 구현 실행. (번역완료) - [원문 보러가기](https://github.com/cosmos/sdk-application-tutorial/blob/master/tutorial/app-init.md)
-3. `keeper`에서 모듈 구현 (번역완료) - [원문 보러가기](https://github.com/cosmos/sdk-application-tutorial/blob/master/tutorial/keeper.md)
-4. `Msgs`와 `Handlers`를 통해 상태 트랜잭션 정의 - [원문 보러가기](https://github.com/cosmos/sdk-application-tutorial/blob/master/tutorial/msgs-handlers.md)
-   - SetName
-   - BuyName
+1. 어플리케이션 설명 - [원문 보러가기](https://github.com/cosmos/sdk-application-tutorial/blob/master/tutorial/app-design.md)  (번역완료)
+2. `./app.go`에서 어플리케이션 구현 실행 - [원문 보러가기](https://github.com/cosmos/sdk-application-tutorial/blob/master/tutorial/app-init.md)  (번역완료)
+3. `keeper`에서 모듈 구현  - [원문 보러가기](https://github.com/cosmos/sdk-application-tutorial/blob/master/tutorial/keeper.md)  (번역완료)
+4. `Msgs`와 `Handlers`를 통해 상태 트랜잭션 정의 - [원문 보러가기](https://github.com/cosmos/sdk-application-tutorial/blob/master/tutorial/msgs-handlers.md)  (번역완료)
+   - SetName - [원문 보러가기](https://github.com/cosmos/sdk-application-tutorial/blob/master/tutorial/set-name.md) (번역완료)
+   - BuyName - [원문 보러가기](https://github.com/cosmos/sdk-application-tutorial/blob/master/tutorial/buy-name.md) (번역완료)
 5. `Queriers`에서 상태머신 조회 - [원문 보러가기](https://github.com/cosmos/sdk-application-tutorial/blob/master/tutorial/queriers.md)
 6. `sdk.Codec`을 사용하여 인코딩된 타입 등록 - [원문 보러가기](https://github.com/cosmos/sdk-application-tutorial/blob/master/tutorial/codec.md)
 7. 모듈과 상호작용하는 CLI 생성 - [원문 보러가기](https://github.com/cosmos/sdk-application-tutorial/blob/master/tutorial/cli.md)
