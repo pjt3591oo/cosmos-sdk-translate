@@ -1,4 +1,4 @@
-# SDK 어플리케이션 튜토리얼
+# SDK 어플리케이션 튜토리얼 ([원문 보러가기](https://github.com/cosmos/sdk-application-tutorial/tree/master/tutorial))
 
 이것은 SDK의 구조, 기본 컨셉, 프로세스, 기능을 빌드하는 방법을 배웁니다. 이 예제는 코스모스 SDK를 이용하여 얼마나 빠르고 쉽게 여러분들만의 블록체인을 만들 수 있는지 보여줍니다.
 
