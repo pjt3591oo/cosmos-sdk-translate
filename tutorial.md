@@ -67,7 +67,7 @@ git init
 5. `Queriers`에서 상태머신 조회
 6. `sdk.Codec`을 사용하여 인코딩된 타입 등록
 7. 모듈과 상호작용하는 CLI 생성
-8. 최종적으로 만들어진 어플리케이션 import
+8. 최종적으로 만들어진 모듈과 어플리케이션 import
 9. 어플리케이션을 위한 `nameserviced`와 `nameservicecli` 엔트리포인트(entry point == 연결지점?) 생성
 10. `dep`을 이용하여 의존성 관리 설정
 
@@ -902,3 +902,215 @@ func GetCmdSetName(cdc *codec.Codec) *cobra.Command {
 
 * `authcmd` 패키지는 여기에 사용됩니다. [여기로 이동하시면 더 많은 정보가 있습니다](https://godoc.org/github.com/cosmos/cosmos-sdk/x/auth/client/cli#GetAccountDecoder). CLI 제어되는 계정에 대한 액세스를 제공하고 서명을 용이하게 합니다.
 
+
+
+## 8. 최종적으로 만들어진 모듈과 어플리케이션 import
+
+
+
+## Import your modules and finish your application
+
+지금 여러분의 모듈을 준비되었고, [`auth`](https://godoc.org/github.com/cosmos/cosmos-sdk/x/auth)와 [`bank`](https://godoc.org/github.com/cosmos/cosmos-sdk/x/bank) 두 모듈과 함께 `./app.go`  파일에 통합 될 수 있습니다.
+
+> 참고: 여러분의 어플리케이션에서 방금 작성한 코드를 import해야 합니다. 여기에서 import 경로가 저장소로 설정됩니다. (`github.com/cosmos/sdk-application-tutorial/x/nameservice`) 자신이 설정한 경로에 따라 경로를 변경해야 합니다 (`github.com/{{ .Username }}/{{ .Project.Repo }}/x/nameservice`).
+
+```go
+package app
+
+import (
+	"github.com/tendermint/tendermint/libs/log"
+
+	"github.com/cosmos/cosmos-sdk/codec"
+	"github.com/cosmos/cosmos-sdk/x/auth"
+	"github.com/cosmos/cosmos-sdk/x/bank"
+	"github.com/cosmos/sdk-application-tutorial/x/nameservice"
+
+	bam "github.com/cosmos/cosmos-sdk/baseapp"
+	sdk "github.com/cosmos/cosmos-sdk/types"
+	abci "github.com/tendermint/tendermint/abci/types"
+	cmn "github.com/tendermint/tendermint/libs/common"
+	dbm "github.com/tendermint/tendermint/libs/db"
+)
+```
+
+다음으로 `nameserviceApp` 구조체에 저장소의 키와 `Keepers`를 추가하고 이에 따라 생성자를 업데이트 해야합니다.
+
+```go
+const (
+	appName = "nameservice"
+)
+
+type nameserviceApp struct {
+	*bam.BaseApp
+	cdc *codec.Codec
+
+	keyMain          *sdk.KVStoreKey
+	keyAccount       *sdk.KVStoreKey
+	keyNSnames       *sdk.KVStoreKey
+	keyNSowners      *sdk.KVStoreKey
+	keyNSprices      *sdk.KVStoreKey
+	keyFeeCollection *sdk.KVStoreKey
+
+	accountKeeper       auth.AccountKeeper
+	bankKeeper          bank.Keeper
+	feeCollectionKeeper auth.FeeCollectionKeeper
+	nsKeeper            nameservice.Keeper
+}
+
+
+func NewnameserviceApp(logger log.Logger, db dbm.DB) *nameserviceApp {
+
+  // First define the top level codec that will be shared by the different modules
+  cdc := MakeCodec()
+
+  // BaseApp handles interactions with Tendermint through the ABCI protocol
+  bApp := bam.NewBaseApp(appName, logger, db, auth.DefaultTxDecoder(cdc))
+
+  // Here you initialize your application with the store keys it requires
+	var app = &nameserviceApp{
+		BaseApp: bApp,
+		cdc:     cdc,
+
+		keyMain:          sdk.NewKVStoreKey("main"),
+		keyAccount:       sdk.NewKVStoreKey("acc"),
+		keyNSnames:       sdk.NewKVStoreKey("ns_names"),
+		keyNSowners:      sdk.NewKVStoreKey("ns_owners"),
+		keyNSprices:      sdk.NewKVStoreKey("ns_prices"),
+		keyFeeCollection: sdk.NewKVStoreKey("fee_collection"),
+	}
+
+  return app
+}
+```
+
+이 시점에서 생성자는 여전히 중요한 논리가 부족합니다. 즉, 다음이 필요합니다.
+
+* 각각의 모듈로부터 `Keeper`들을 요청하여 인스턴스화 합니다.
+* 각각의 `Keeper`로 부터 요청된 `storeKey` 들을 생성합니다.
+* 각 모듈에 `핸들러`를 등록합니다. `baseapp`의 라우터에서 `addRoute()` 메소드를 사용합니다.
+* 각 모듈의 Queryiers를 등록합니다. 이 경우 `baseapp`의 queryRouter에 있는 `addRoute()` 메소드를 사용합니다.
+* `baseApp` 멀티 스토어에 제공된 키에 `KVStores`를 마운트 하십시오.
+* 초기 어플리케이션 상태를 정의하기 위해 `initChainer`를 설정합니다.
+
+최종 생성자는 다음과 같습니다.
+
+```go
+// NewnameserviceApp is a constructor function for nameserviceApp
+func NewnameserviceApp(logger log.Logger, db dbm.DB) *nameserviceApp {
+
+	// First define the top level codec that will be shared by the different modules
+	cdc := MakeCodec()
+
+	// BaseApp handles interactions with Tendermint through the ABCI protocol
+	bApp := bam.NewBaseApp(appName, logger, db, auth.DefaultTxDecoder(cdc))
+
+	// Here you initialize your application with the store keys it requires
+	var app = &nameserviceApp{
+		BaseApp: bApp,
+		cdc:     cdc,
+
+		keyMain:          sdk.NewKVStoreKey("main"),
+		keyAccount:       sdk.NewKVStoreKey("acc"),
+		keyNSnames:       sdk.NewKVStoreKey("ns_names"),
+		keyNSowners:      sdk.NewKVStoreKey("ns_owners"),
+		keyNSprices:      sdk.NewKVStoreKey("ns_prices"),
+		keyFeeCollection: sdk.NewKVStoreKey("fee_collection"),
+	}
+
+	// The AccountKeeper handles address -> account lookups
+	app.accountKeeper = auth.NewAccountKeeper(
+		app.cdc,
+		app.keyAccount,
+		auth.ProtoBaseAccount,
+	)
+
+	// The BankKeeper allows you perform sdk.Coins interactions
+	app.bankKeeper = bank.NewBaseKeeper(app.accountKeeper)
+
+	// The FeeCollectionKeeper collects transaction fees and renders them to the fee distribution module
+	app.feeCollectionKeeper = auth.NewFeeCollectionKeeper(cdc, app.keyFeeCollection)
+
+	// The NameserviceKeeper is the Keeper from the module for this tutorial
+	// It handles interactions with the namestore
+	app.nsKeeper = nameservice.NewKeeper(
+		app.bankKeeper,
+		app.keyNSnames,
+		app.keyNSowners,
+		app.keyNSprices,
+		app.cdc,
+	)
+
+	// The AnteHandler handles signature verification and transaction pre-processing
+	app.SetAnteHandler(auth.NewAnteHandler(app.accountKeeper, app.feeCollectionKeeper))
+
+	// The app.Router is the main transaction router where each module registers it's routes
+	// Register the bank and nameservice routes here
+	app.Router().
+		AddRoute("bank", bank.NewHandler(app.bankKeeper)).
+		AddRoute("nameservice", nameservice.NewHandler(app.nsKeeper))
+
+	// The app.QueryRouter is the main query router where each module registers it's routes
+	app.QueryRouter().
+		AddRoute("nameservice", nameservice.NewQuerier(app.nsKeeper))
+
+	// The initChainer handles translating the genesis.json file into initial state for the network
+	app.SetInitChainer(app.initChainer)
+
+	app.MountStoresIAVL(
+		app.keyMain,
+		app.keyAccount,
+		app.keyNSnames,
+		app.keyNSowners,
+		app.keyNSprices,
+	)
+
+	err := app.LoadLatestVersion(app.keyMain)
+	if err != nil {
+		cmn.Exit(err.Error())
+	}
+
+	return app
+}
+```
+
+`initChainer`는 genesis.json의 계정이 초기체인 시작시 어플리케이션 상태로 매핑되는 방법을 정의합니다.
+
+생성자는 `initChainer` 함수를 등록했지만 아직 정의되지 않았습니다. 계속해서 그것을 생성합니다.
+
+```go
+// GenesisState represents chain state at the start of the chain. Any initial state (account balances) are stored here.
+type GenesisState struct {
+	Accounts []auth.BaseAccount `json:"accounts"`
+}
+
+func (app *nameserviceApp) initChainer(ctx sdk.Context, req abci.RequestInitChain) abci.ResponseInitChain {
+	stateJSON := req.AppStateBytes
+
+	genesisState := new(GenesisState)
+	err := app.cdc.UnmarshalJSON(stateJSON, genesisState)
+	if err != nil {
+		panic(err)
+	}
+
+	for _, acc := range genesisState.Accounts {
+		acc.AccountNumber = app.accountKeeper.GetNextAccountNumber(ctx)
+		app.accountKeeper.SetAccount(ctx, &acc)
+	}
+
+	return abci.ResponseInitChain{}
+}
+```
+
+마지막으로 헬퍼함수를 추가하여 어플리케이션에서 사용하는 모든 모듈을 제대로 등록하는 amino [`*codec.Codec`](https://godoc.org/github.com/cosmos/cosmos-sdk/codec#Codec) 코덱을 생성합니다. 
+
+```go
+func MakeCodec() *codec.Codec {
+	var cdc = codec.New()
+	auth.RegisterCodec(cdc)
+	bank.RegisterCodec(cdc)
+	nameservice.RegisterCodec(cdc)
+	sdk.RegisterCodec(cdc)
+	codec.RegisterCrypto(cdc)
+	return cdc
+}
+```
