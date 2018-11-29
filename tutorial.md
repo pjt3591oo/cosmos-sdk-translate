@@ -720,3 +720,185 @@ func RegisterCodec(cdc *codec.Codec) {
 }
 ```
 
+
+
+## 7. sdk.Codec을 사용하여 인코딩된 타입 등록
+
+
+
+## Nameservice Module CLI
+
+코스모스 SDK는 CLI 인터페이스를 위해 [`cobra`](https://github.com/spf13/cobra) 라이브러리를 사용한다. 이 라이브러리는 각 모듈이 자신의 명령을 쉽게 노출 할 수 있게 합니다. 모듈과 사용자의 CLI 상호작용을 정의하려면 다음 파일을 작성하세요.
+
+* `./x/nameservice/client/cli/query.go`
+* `./x/nameservice/client/cli/tx.go`
+
+`query.go`에서 시작하십시오. 여기에 각 모듈에 대한 커맨드 쿼리들(`Queries`)들을 위해 `cobra.Comman`를 정의하세요.(`resolve` 그리고 `whois`)
+
+```go
+package cli
+
+import (
+	"fmt"
+
+	"github.com/cosmos/cosmos-sdk/client/context"
+	"github.com/cosmos/cosmos-sdk/codec"
+	"github.com/spf13/cobra"
+)
+
+// GetCmdResolveName queries information about a name
+func GetCmdResolveName(queryRoute string, cdc *codec.Codec) *cobra.Command {
+	return &cobra.Command{
+		Use:   "resolve [name]",
+		Short: "resolve name",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			cliCtx := context.NewCLIContext().WithCodec(cdc)
+			name := args[0]
+
+			res, err := cliCtx.QueryWithData(fmt.Sprintf("custom/%s/resolve/%s", queryRoute, name), nil)
+			if err != nil {
+				fmt.Printf("could not resolve name - %s \n", string(name))
+				return nil
+			}
+
+			fmt.Println(string(res))
+
+			return nil
+		},
+	}
+}
+
+// GetCmdWhois queries information about a domain
+func GetCmdWhois(queryRoute string, cdc *codec.Codec) *cobra.Command {
+	return &cobra.Command{
+		Use:   "whois [name]",
+		Short: "Query whois info of name",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			cliCtx := context.NewCLIContext().WithCodec(cdc)
+			name := args[0]
+
+			res, err := cliCtx.QueryWithData(fmt.Sprintf("custom/%s/whois/%s", queryRoute, name), nil)
+			if err != nil {
+				fmt.Printf("could not resolve whois - %s \n", string(name))
+				return nil
+			}
+
+			fmt.Println(string(res))
+
+			return nil
+		},
+	}
+}
+```
+
+앞의 코드에 대한 참고사항
+
+* CLI가 새로운 [`CLIContext`](https://godoc.org/github.com/cosmos/cosmos-sdk/client/context#CLIContext) `컨텍스트`를 소개합니다. CLI 상호작용에 필요한 사용자 입력 및 어플리케이션 구성에 대한 데이터를 전달합니다.
+* `cliCtx.QueryWithData()` 함수에 필요한 `경로`는 쿼리 라우터의 이름에 직접 매핑합니다.
+  *  경로의 첫 번째 부분은 SDK 어플리케이션에서 가능한 쿼리 유형을 구분하는데 사용합니다. (의역: 사용자 정의된 쿼리를 구분하기위해 사용됩니다.)
+  * 두 번째 부분(`nameservice`)은 조회를 라우팅할 모듈의 이름입니다.
+  * 마지막으로 모듈에는 호출될 특정 쿼리가 있습니다.
+  * 이 예에서 네 번째 부분이 쿼리입니다. 쿼리 매개변수는 간단한 문자열이기 때문에 동작합니다. 더 복잡한 쿼리입력을 사용하려면 `.QeuryWithData()` 함수의 두 번쨰 인수를 사용하여 데이터를 정달해야 합니다.
+
+이제 쿼리 상호 작용이 정의되었으므로 `tx.go`의 트랜잭션 생성할 차례입니다.
+
+> 참고: 여러분의 어플리케이션에서 방금 작성한 코드를 import해야 합니다. 여기에서 import 경로가 저장소로 설정됩니다. (`github.com/cosmos/sdk-application-tutorial/x/nameservice`) 자신이 설정한 경로에 따라 경로를 변경해야 합니다 (`github.com/{{ .Username }}/{{ .Project.Repo }}/x/nameservice`).
+
+```go
+package cli
+
+import (
+	"github.com/spf13/cobra"
+
+	"github.com/cosmos/cosmos-sdk/client/context"
+	"github.com/cosmos/cosmos-sdk/client/utils"
+	"github.com/cosmos/cosmos-sdk/codec"
+	"github.com/cosmos/sdk-application-tutorial/x/nameservice"
+
+	sdk "github.com/cosmos/cosmos-sdk/types"
+	authcmd "github.com/cosmos/cosmos-sdk/x/auth/client/cli"
+	authtxb "github.com/cosmos/cosmos-sdk/x/auth/client/txbuilder"
+)
+
+// GetCmdBuyName is the CLI command for sending a BuyName transaction
+func GetCmdBuyName(cdc *codec.Codec) *cobra.Command {
+	return &cobra.Command{
+		Use:   "buy-name [name] [amount]",
+		Short: "bid for existing name or claim new name",
+		Args:  cobra.ExactArgs(2),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			cliCtx := context.NewCLIContext().
+				WithCodec(cdc).
+				WithAccountDecoder(authcmd.GetAccountDecoder(cdc))
+
+			txBldr := authtxb.NewTxBuilderFromCLI().WithCodec(cdc)
+
+			if err := cliCtx.EnsureAccountExists(); err != nil {
+				return err
+			}
+
+			coins, err := sdk.ParseCoins(args[1])
+			if err != nil {
+				return err
+			}
+
+			account, err := cliCtx.GetFromAddress()
+			if err != nil {
+				return err
+			}
+
+			msg := nameservice.NewMsgBuyName(args[0], coins, account)
+			err = msg.ValidateBasic()
+			if err != nil {
+				return err
+			}
+
+			cliCtx.PrintResponse = true
+
+			return utils.CompleteAndBroadcastTxCli(txBldr, cliCtx, []sdk.Msg{msg})
+		},
+	}
+}
+
+// GetCmdSetName is the CLI command for sending a SetName transaction
+func GetCmdSetName(cdc *codec.Codec) *cobra.Command {
+	return &cobra.Command{
+		Use:   "set-name [name] [value]",
+		Short: "set the value associated with a name that you own",
+		Args:  cobra.ExactArgs(2),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			cliCtx := context.NewCLIContext().
+				WithCodec(cdc).
+				WithAccountDecoder(authcmd.GetAccountDecoder(cdc))
+
+			txBldr := authtxb.NewTxBuilderFromCLI().WithCodec(cdc)
+
+			if err := cliCtx.EnsureAccountExists(); err != nil {
+				return err
+			}
+
+			account, err := cliCtx.GetFromAddress()
+			if err != nil {
+				return err
+			}
+
+			msg := nameservice.NewMsgSetName(args[0], args[1], account)
+			err = msg.ValidateBasic()
+			if err != nil {
+				return err
+			}
+
+			cliCtx.PrintResponse = true
+
+			return utils.CompleteAndBroadcastTxCli(txBldr, cliCtx, []sdk.Msg{msg})
+		},
+	}
+}
+```
+
+앞의 코드에 대한 참고사항
+
+* `authcmd` 패키지는 여기에 사용됩니다. [여기로 이동하시면 더 많은 정보가 있습니다](https://godoc.org/github.com/cosmos/cosmos-sdk/x/auth/client/cli#GetAccountDecoder). CLI 제어되는 계정에 대한 액세스를 제공하고 서명을 용이하게 합니다.
+
