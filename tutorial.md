@@ -70,6 +70,7 @@ git init
 8. 최종적으로 만들어진 모듈과 어플리케이션 import
 9. 어플리케이션을 위한 `nameserviced`와 `nameservicecli` 엔트리포인트(entry point == 연결지점?) 생성
 10. `dep`을 이용하여 의존성 관리 설정
+11. 어플리케이션 빌드 그리고 실행
 
 
 
@@ -1114,3 +1115,496 @@ func MakeCodec() *codec.Codec {
 	return cdc
 }
 ```
+
+
+
+ ## 9. 어플리케이션을 위한 `nameserviced`와 `nameservicecli` 엔트리포인트(entry point == 연결지점?) 생성
+
+
+
+## Entrypoints
+
+golang에서 규칙은 프로젝트의 `./cmd` 디렉터리에 바이너리로 컴파일되는 파일을 저장하는 것 입니다. 어플리케이션을 만들려는 2가지 바이너리 파일이 있습니다
+
+* `nameserviced`: 이 바이너리 파일은 p2p 연결을 하고 트랜잭션을 전파하고 로컬 저장소를 처리하며 네트워크와 상호 작용할 RPC 인터페이스를 제공하는 점에서 `bitcoind` 또는 다른 암호화페 데몬프로그램과 유사합니다. 이 경우 Tendermint는 네트워킹 및 거래 주문에 사용합니다.
+* `Nameservicecli`: 이 바이너리 파일은 어플리케이션에서 사용자와 상호작용하는 명령어를 제공합니다.
+
+시작하려면 바이너리를 인스턴스화 할 프로젝트를 디렉토리에 두 개의 파을을 작성합니다.
+
+* `./cmd/nameserviced/main.go`
+* `./cmd/nameservicecli/main.go`
+
+
+
+##  `nameserviced`
+
+`./nameserviced/main.go`에 다음 코드를 추가하여 시작하세요
+
+> 참고: 여러분의 어플리케이션에서 방금 작성한 코드를 import해야 합니다. 여기에서 import 경로가 저장소로 설정됩니다 (`github.com/cosmos/sdk-application-tutorial`). 자신이 설정한 경로에 따라 경로를 변경해야 합니다 (`github.com/{{ .Username }}/{{ .Project.Repo }`).
+
+```go
+package main
+
+import (
+	"encoding/json"
+	"fmt"
+	"io"
+	"os"
+
+	"github.com/cosmos/cosmos-sdk/client"
+	"github.com/cosmos/cosmos-sdk/codec"
+	"github.com/cosmos/cosmos-sdk/server"
+	"github.com/spf13/cobra"
+	"github.com/spf13/viper"
+	"github.com/tendermint/tendermint/libs/cli"
+	"github.com/tendermint/tendermint/libs/common"
+	"github.com/tendermint/tendermint/libs/log"
+	"github.com/tendermint/tendermint/p2p"
+
+	gaiaInit "github.com/cosmos/cosmos-sdk/cmd/gaia/init"
+	app "github.com/cosmos/sdk-application-tutorial"
+	abci "github.com/tendermint/tendermint/abci/types"
+	dbm "github.com/tendermint/tendermint/libs/db"
+	tmtypes "github.com/tendermint/tendermint/types"
+)
+
+// DefaultNodeHome sets the folder where the applcation data and configuration will be stored
+var DefaultNodeHome = os.ExpandEnv("$HOME/.nameserviced")
+
+func main() {
+	cobra.EnableCommandSorting = false
+
+	cdc := app.MakeCodec()
+	ctx := server.NewDefaultContext()
+
+	appInit := server.AppInit{
+		AppGenState: server.SimpleAppGenState,
+	}
+
+	rootCmd := &cobra.Command{
+		Use:               "nameserviced",
+		Short:             "nameservice App Daemon (server)",
+		PersistentPreRunE: server.PersistentPreRunEFn(ctx),
+	}
+
+	rootCmd.AddCommand(InitCmd(ctx, cdc, appInit))
+
+	server.AddCommands(ctx, cdc, rootCmd, appInit, newApp, exportAppStateAndTMValidators)
+
+	// prepare and add flags
+	executor := cli.PrepareBaseCmd(rootCmd, "NS", DefaultNodeHome)
+	err := executor.Execute()
+	if err != nil {
+		// handle with #870
+		panic(err)
+	}
+}
+
+func newApp(logger log.Logger, db dbm.DB, traceStore io.Writer) abci.Application {
+	return app.NewnameserviceApp(logger, db)
+}
+
+func exportAppStateAndTMValidators(logger log.Logger, db dbm.DB, traceStore io.Writer) (json.RawMessage, []tmtypes.GenesisValidator, error) {
+	return nil, nil, nil
+}
+
+// get cmd to initialize all files for tendermint and application
+// nolint: errcheck
+func InitCmd(ctx *server.Context, cdc *codec.Codec, appInit server.AppInit) *cobra.Command {
+	return &cobra.Command{
+		Use:   "init",
+		Short: "Initialize genesis config, priv-validator file, and p2p-node file",
+		Args:  cobra.NoArgs,
+		RunE: func(_ *cobra.Command, _ []string) error {
+
+			config := ctx.Config
+			config.SetRoot(viper.GetString(cli.HomeFlag))
+			chainID := viper.GetString(client.FlagChainID)
+			if chainID == "" {
+				chainID = fmt.Sprintf("test-chain-%v", common.RandStr(6))
+			}
+
+			nodeKey, err := p2p.LoadOrGenNodeKey(config.NodeKeyFile())
+			if err != nil {
+				return err
+			}
+			nodeID := string(nodeKey.ID())
+
+			pk := gaiaInit.ReadOrCreatePrivValidator(config.PrivValidatorFile())
+			genTx, appMessage, validator, err := server.SimpleAppGenTx(cdc, pk)
+			if err != nil {
+				return err
+			}
+
+			appState, err := appInit.AppGenState(cdc, []json.RawMessage{genTx})
+			if err != nil {
+				return err
+			}
+			appStateJSON, err := cdc.MarshalJSON(appState)
+			if err != nil {
+				return err
+			}
+
+			toPrint := struct {
+				ChainID    string          `json:"chain_id"`
+				NodeID     string          `json:"node_id"`
+				AppMessage json.RawMessage `json:"app_message"`
+			}{
+				chainID,
+				nodeID,
+				appMessage,
+			}
+			out, err := codec.MarshalJSONIndent(cdc, toPrint)
+			if err != nil {
+				return err
+			}
+			fmt.Fprintf(os.Stderr, "%s\n", string(out))
+			return gaiaInit.WriteGenesisFile(config.GenesisFile(), chainID, []tmtypes.GenesisValidator{validator}, appStateJSON)
+		},
+	}
+}
+
+```
+
+앞의 코드에 대한 참고사항
+
+* 위 코드의 대부분은 다음과 같습니다.
+  * Tendermint
+  * Cosmos-SDK
+  * 여러분의 Nameservice 모듈
+* 나머지 코드는 어플리케이션 구성에서 초기 상태를 생성하는데 도와줍니다.
+
+
+
+## `nameservicecli`
+
+`nameservicecli` 명령을 작성하여 마무리 하세요.
+
+> 참고: 여러분의 어플리케이션에서 방금 작성한 코드를 import해야 합니다. 여기에서 import 경로가 저장소로 설정됩니다 (`github.com/cosmos/sdk-application-tutorial`). 자신이 설정한 경로에 따라 경로를 변경해야 합니다 (`github.com/{{ .Username }}/{{ .Project.Repo }}`).
+
+```go
+package main
+
+import (
+	"os"
+
+	"github.com/spf13/cobra"
+	"github.com/tendermint/tendermint/libs/cli"
+	"github.com/cosmos/cosmos-sdk/client"
+	"github.com/cosmos/cosmos-sdk/client/keys"
+	"github.com/cosmos/cosmos-sdk/client/rpc"
+	"github.com/cosmos/cosmos-sdk/client/tx"
+
+	authcmd "github.com/cosmos/cosmos-sdk/x/auth/client/cli"
+	app "github.com/cosmos/sdk-application-tutorial"
+	nameservicecmd "github.com/cosmos/sdk-application-tutorial/x/nameservice/client/cli"
+)
+
+const storeAcc = "acc"
+
+var (
+	rootCmd = &cobra.Command{
+		Use:   "nameservicecli",
+		Short: "nameservice Client",
+	}
+	defaultCLIHome = os.ExpandEnv("$HOME/.nameservicecli")
+)
+
+func main() {
+	cobra.EnableCommandSorting = false
+	cdc := app.MakeCodec()
+
+	rootCmd.AddCommand(client.ConfigCmd())
+	rpc.AddCommands(rootCmd)
+
+	queryCmd := &cobra.Command{
+		Use:     "query",
+		Aliases: []string{"q"},
+		Short:   "Querying subcommands",
+	}
+
+	queryCmd.AddCommand(
+		rpc.BlockCommand(),
+		rpc.ValidatorCommand(),
+	)
+	tx.AddCommands(queryCmd, cdc)
+	queryCmd.AddCommand(client.LineBreak)
+	queryCmd.AddCommand(client.GetCommands(
+		authcmd.GetAccountCmd(storeAcc, cdc, authcmd.GetAccountDecoder(cdc)),
+		nameservicecmd.GetCmdResolveName("nameservice", cdc),
+		nameservicecmd.GetCmdWhois("nameservice", cdc),
+	)...)
+
+	txCmd := &cobra.Command{
+		Use:   "tx",
+		Short: "Transactions subcommands",
+	}
+
+	txCmd.AddCommand(client.PostCommands(
+		nameservicecmd.GetCmdBuyName(cdc),
+		nameservicecmd.GetCmdSetName(cdc),
+	)...)
+
+	rootCmd.AddCommand(
+		queryCmd,
+		txCmd,
+		client.LineBreak,
+	)
+
+	rootCmd.AddCommand(
+		keys.Commands(),
+	)
+
+	executor := cli.PrepareMainCmd(rootCmd, "NS", defaultCLIHome)
+	err := executor.Execute()
+	if err != nil {
+		panic(err)
+	}
+}
+```
+
+참고:
+
+* 위 코드의 대부분은 다음과 같습니다.
+  * Tendermint
+  * Cosmos-SDK
+  * 여러분의 Nameservice 모듈
+* [`cobra` CLI documentation](http://github.com/spf13/cobra) 문서는 앞의 코드를 이해하는데 도움을 줍니다.
+
+
+
+## 10. dep을 이용하여 의존성 관리 설정
+
+
+
+##  어플리케이션 빌드
+
+
+
+## `Makefile`
+
+일반 명령어가 포함된 Makefile을 작성하여 사용자가 응용프로그램을 빌드할 수 있습니다.
+
+> 참고: 아래 Makefile에는 Cosmos SDK와 Tendermint Makefiles와 동일한 명령을 포함합니다.
+
+```Makefile
+DEP := $(shell command -v dep 2> /dev/null)
+
+get_tools:
+ifndef DEP
+	@echo "Installing dep"
+	go get -u -v github.com/golang/dep/cmd/dep
+else
+	@echo "Dep is already installed..."
+endif
+
+get_vendor_deps:
+	@echo "--> Generating vendor directory via dep ensure"
+	@rm -rf .vendor-new
+	@dep ensure -v -vendor-only
+
+update_vendor_deps:
+	@echo "--> Running dep ensure"
+	@rm -rf .vendor-new
+	@dep ensure -v -update
+
+install:
+	go install ./cmd/nameserviced
+	go install ./cmd/nameservicecli
+```
+
+
+
+## `Gopkg.toml`
+
+고랭은 의존성을 관리하는 툴을 가지고 있습니다. 이 튜툐리얼에서는  [`dep`](https://golang.github.io/dep/)을 사용합니다. `dap` 저장소 루트에 있는 `Gopkg.toml` 파일을 사용하여 어플리케이션에 필요한 의존성을 정의합니다. 코스모드 SDK 어플리케이션은 현재 일부 라이브러리 특정 버전에 따라 다릅니다. 아래는 필요한 모든 버전이 포함되어 있습니다. 시작하려면 `./Gopkg.toml` 파일의 내용을 아래에 제약 조건 및 재정의로 바꾸세요.
+
+```go
+# Gopkg.toml example
+#
+# Refer to https://golang.github.io/dep/docs/Gopkg.toml.html
+# for detailed Gopkg.toml documentation.
+#
+# required = ["github.com/user/thing/cmd/thing"]
+# ignored = ["github.com/user/project/pkgX", "bitbucket.org/user/project/pkgA/pkgY"]
+#
+# [[constraint]]
+#   name = "github.com/user/project"
+#   version = "1.0.0"
+#
+# [[constraint]]
+#   name = "github.com/user/project2"
+#   branch = "dev"
+#   source = "github.com/myfork/project2"
+#
+# [[override]]
+#   name = "github.com/x/y"
+#   version = "2.4.0"
+#
+# [prune]
+#   non-go = false
+#   go-tests = true
+#   unused-packages = true
+
+[[constraint]]
+  name = "github.com/cosmos/cosmos-sdk"
+  version = "v0.25.0"
+
+[[override]]
+  name = "github.com/golang/protobuf"
+  version = "=1.1.0"
+
+[[constraint]]
+  name = "github.com/spf13/cobra"
+  version = "~0.0.1"
+
+[[constraint]]
+  name = "github.com/spf13/viper"
+  version = "~1.0.0"
+
+[[override]]
+  name = "github.com/tendermint/go-amino"
+  version = "=v0.12.0"
+
+[[override]]
+  name = "github.com/tendermint/iavl"
+  version = "=v0.11.0"
+
+[[override]]
+  name = "github.com/tendermint/tendermint"
+  version = "=0.25.0"
+
+[[override]]
+  name = "golang.org/x/crypto"
+  source = "https://github.com/tendermint/crypto"
+  revision = "3764759f34a542a3aef74d6b02e35be7ab893bba"
+
+[prune]
+  go-tests = true
+  unused-packages = true
+```
+
+> 참고: 만약 여러분의 저장소에서 시작한다면, 실행하기 전에 `dep ensure -v` 을 실행하기 전에 `github.com/cosmos/sdk-application-tutorial`을 여러분의 저장소 경로로 바꿔야 합니다. 그렇지 않으면 `dep ensure -v`를 디시 실행하기 전에 `./vendor` 디렉터리(`rm -rf ./vendor`)와 `Gopkg.lock` 파일(`rm Gopkg.lock`)을 제거해야 합니다.
+
+이제 유지관리가 끝났으므로 의존성과 dep를 이용하여 설치를 진행합니다.
+
+```bash
+$ make get_tools
+$ dep init -v
+```
+
+
+
+##  어플리케이션 빌드
+
+```bash
+# Update dependencies to match the constraints and overrides above
+$ dep ensure # dep ensure -update -v 
+
+# Install the app into your $GOBIN
+$ make install
+
+# Now you should be able to run the following commands:
+$ nameserviced help
+$ nameservicecli help
+```
+
+
+
+## 11. 어플리케이션 빌드 그리고 실행
+
+
+
+##  Building And running the application
+
+
+
+## 어플리케이션 `nameservice` 빌드
+
+이 저장소에서 `nameservice` 어플리케이션을 빌드하여 기능을 확인하기 위해선 `dep`를 설치해야 합니다.
+
+> 참고:  아래에는 `dep` 사이트의 쉘 스크립트를 사용하여 설치하는 명령어입니다. 만약 불편하다면 플랫폼별 [사용 지침서](https://golang.github.io/dep/docs/installation.html)를 사용하세요.
+
+```bash
+# Install dep
+$ curl https://raw.githubusercontent.com/golang/dep/master/install.sh | sh
+
+# Initialize dep and install dependencies
+$ make get_tools && make get_vendor_deps
+
+# Install the app into your $GOBIN
+$ make install
+
+# Now you should be able to run the following commands:
+$ nameserviced help
+$ nameservicecli help
+```
+
+
+
+## 라이브 네트워크 실행 및 명령 사용
+
+어플리케이션에 대한 `genesis.json` 파일과 트랜잭션 계정을 초기화 하려면 다음을 실행합니다.
+
+> 참고: init 명령어의 출력에서 chain-id를 복사하고, 두 번째 명령어의 출력에서 주소를 복사한 후 어플리케이션 명령을 조금 더 아래에서 실행할 때 사용할 수 있도록 저장합니다(즉, init을 통해 만들어진 chain-id와 keys add를 통해 만들어진 주소를 저장하여 뒤에서 사용할 수 있도록 저장해둡니다).
+
+```bash
+# Copy the chain_id and app_message.secret output here and save it for later user
+$ nameserviced init
+
+# Use app_message.secret recover jack's account. 
+# Copy the `Address` output here and save it for later use
+$ nameservicecli keys add jack --recover
+
+# Create another account with random secret.
+# Copy the `Address` output here and save it for later use
+$ nameservicecli keys add tim
+```
+
+그런다음 생성 된 파일 `./.nameserviced/configgenesis.json` 파일을 텍스트 편집기에서 열고 `nameservicecli keys add` 명령의 주소 출력을 `"account"` 필드 아래의 `"address"` 값을 복사하세요. 이렇게 하면 로컬 네트워크를 시작할 때 코인이 있는 지갑을 제어할 수 있습니다.
+
+여러분은 `nameserviced start` 호출을 통해 `nameserviced`를 사용할 수 있습니다. 블록이 생성되면서 발생한 로그를 실시간으로 볼 수 있습니다.
+
+방금 생성한 네트워크에 대해 명령을 실행하려면 다른 터미널을 여세요.
+
+> 참고:  아래 명령에서 `--chain-id` 및 `account address` 터미널 유틸니티를 사용하여 가져옵니다 (앞에서 init과 keys add를 통해 복사한 값을 넣어주면 됨). 또한 위의 네트워크 부트스트랩에서 저장된 원시 문자열을 입력 할 수도 있습니다. 다음 명령어를 사용하려면 컴퓨터에 [`jq`](https://stedolan.github.io/jq/download/)를 설치해야 합니다.
+
+```bash
+# First check the accounts to ensure they have funds
+$ nameservicecli query account $(nameservicecli keys list -o json | jq -r .[0].address) \
+    --indent --chain-id $(cat ~/.nameserviced/config/genesis.json | jq -r .chain_id) 
+$ nameservicecli query account $(nameservicecli keys list -o json | jq -r .[1].address) \
+    --indent --chain-id $(cat ~/.nameserviced/config/genesis.json | jq -r .chain_id) 
+
+# Buy your first name using your coins from the genesis file
+$ nameservicecli tx buy-name jack.id 5mycoin \
+    --from     $(nameservicecli keys list -o json | jq -r .[0].address) \
+    --chain-id $(cat ~/.nameserviced/config/genesis.json | jq -r .chain_id)
+
+# Set the value for the name you just bought
+$ nameservicecli tx set-name jack.id 8.8.8.8 \
+    --from     $(nameservicecli keys list -o json | jq -r .[0].address) \
+    --chain-id $(cat ~/.nameserviced/config/genesis.json | jq -r .chain_id)
+
+# Try out a resolve query against the name you registered
+$ nameservicecli query resolve jack.id --chain-id $(cat ~/.nameserviced/config/genesis.json | jq -r .chain_id)
+# > 8.8.8.8
+
+# Try out a whois query against the name you just registered
+$ nameservicecli query whois jack.id --chain-id $(cat ~/.nameserviced/config/genesis.json | jq -r .chain_id)
+# > {"value":"8.8.8.8","owner":"cosmos1l7k5tdt2qam0zecxrx78yuw447ga54dsmtpk2s","price":[{"denom":"mycoin","amount":"5"}]}
+
+# Jack send some coin to tim, then tim can buy name from jack.  
+$ nameservicecli tx send \
+    --from     $(nameservicecli keys list -o json | jq -r .[0].address) \
+    --to       $(nameservicecli keys list -o json | jq -r .[1].address) \
+    --chain-id $(cat ~/.nameserviced/config/genesis.json | jq -r .chain_id) \
+    --amount 1000mycoin
+
+# Tim buy name from jack
+$ nameservicecli tx buy-name jack.id 10mycoin \
+    --from     $(nameservicecli keys list -o json | jq -r .[0].address) \
+    --chain-id $(cat ~/.nameserviced/config/genesis.json | jq -r .chain_id)
+
+```
+

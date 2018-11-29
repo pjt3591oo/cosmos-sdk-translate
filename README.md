@@ -18,6 +18,6 @@
 6. `sdk.Codec`을 사용하여 인코딩된 타입 등록 - [원문 보러가기](https://github.com/cosmos/sdk-application-tutorial/blob/master/tutorial/codec.md) (번역완료)
 7. 모듈과 상호작용하는 CLI 생성 - [원문 보러가기](https://github.com/cosmos/sdk-application-tutorial/blob/master/tutorial/cli.md) (번역완료)
 8. 최종적으로 만들어진 어플리케이션 import - [원문 보러가기](https://github.com/cosmos/sdk-application-tutorial/blob/master/tutorial/app-complete.md) (번역완료)
-9. 어플리케이션을 위한 `nameserviced`와 `nameservicecli` 엔트리포인트(entry point == 연결지점?) 생성 - [원문 보러가기](https://github.com/cosmos/sdk-application-tutorial/blob/master/tutorial/entrypoint.md)
-10. `dep`을 이용하여 의존성 관리 설정 - [원문 보러가기](https://github.com/cosmos/sdk-application-tutorial/blob/master/tutorial/dep.md)
+9. 어플리케이션을 위한 `nameserviced`와 `nameservicecli` 엔트리포인트(entry point == 연결지점?) 생성 - [원문 보러가기](https://github.com/cosmos/sdk-application-tutorial/blob/master/tutorial/entrypoint.md) (번역완료)
+10. `dep`을 이용하여 의존성 관리 설정 - [원문 보러가기](https://github.com/cosmos/sdk-application-tutorial/blob/master/tutorial/dep.md) (번역완료)
 
