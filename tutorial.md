@@ -696,3 +696,27 @@ func handleMsgBuyName(ctx sdk.Context, keeper Keeper, msg MsgBuyName) sdk.Result
 
 > 참고:  이 핸들러는 코인 운영을 위해 `coinKeeper`의 기능을 사용합니다. 어플리케이션에서 코인 운영 작업을 수행하는 경우  [godocs for this module](https://godoc.org/github.com/cosmos/cosmos-sdk/x/bank#BaseKeeper)를 참고하세요.
 
+
+
+## 6. sdk.Codec을 사용하여 인코딩된 타입 등록
+
+
+
+## Codec File
+
+인코딩/디코딩 할 수 있도록 Amino에 유형을 등록([register your types with Amino](https://github.com/tendermint/go-amino#registering-types) )하려면 `./x/nameservice/codec.go`에 작성해야하는 약간의 코드가 있습니다. 생성 한 모든 인터페이스와 인터페이스를 구현하는 모근 구조체는 `RegisterCodec` 함수에서 선언해야 합니다. 이 모듈에서는 두 개의 `Msg` 구현(`SetName` 및 `BuyName`)을 등록해야 하지만 Whois 쿼리 반환 타입은 등록하지 않습니다.
+
+```go
+package nameservice
+
+import (
+	"github.com/cosmos/cosmos-sdk/codec"
+)
+
+// RegisterCodec registers concrete types on wire codec
+func RegisterCodec(cdc *codec.Codec) {
+	cdc.RegisterConcrete(MsgSetName{}, "nameservice/SetName", nil)
+	cdc.RegisterConcrete(MsgBuyName{}, "nameservice/BuyName", nil)
+}
+```
+
